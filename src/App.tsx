@@ -15,13 +15,17 @@ const initialMarkersByType: Record<WaterType, Marker[]> = {
 function MapPage() {
   const mapRef = useRef<MapRef>(null);
   const [activeWaterType, setActiveWaterType] = useState<WaterType>("ponds");
-  const [markersByType, setMarkersByType] = useState<Record<WaterType, Marker[]>>(initialMarkersByType);
+  const [draftMarkersByType, setDraftMarkersByType] =
+    useState<Record<WaterType, Marker[]>>(initialMarkersByType);
+  const [submittedMarkersByType, setSubmittedMarkersByType] =
+    useState<Record<WaterType, Marker[]>>(initialMarkersByType);
 
-  const markers = markersByType[activeWaterType];
+  const draftMarkers = draftMarkersByType[activeWaterType];
+  const submittedMarkers = submittedMarkersByType[activeWaterType];
 
-  const setMarkers = useCallback(
+  const setDraftMarkers = useCallback(
     (next: Marker[] | ((prev: Marker[]) => Marker[])) => {
-      setMarkersByType((prev) => ({
+      setDraftMarkersByType((prev) => ({
         ...prev,
         [activeWaterType]: typeof next === "function" ? next(prev[activeWaterType]) : next,
       }));
@@ -31,7 +35,7 @@ function MapPage() {
 
   const handleHistoryItemClick = useCallback(
     (markerId: string) => {
-      const marker = markers.find((m) => m.id === markerId);
+      const marker = submittedMarkers.find((m) => m.id === markerId);
       if (marker && mapRef.current) {
         mapRef.current.flyTo({
           center: [marker.longitude, marker.latitude],
@@ -40,21 +44,34 @@ function MapPage() {
         });
       }
     },
-    [markers]
+    [submittedMarkers]
   );
+
+  const handleSubmitDraftMarkers = useCallback(() => {
+    setSubmittedMarkersByType((prev) => ({
+      ...prev,
+      [activeWaterType]: [...prev[activeWaterType], ...draftMarkers],
+    }));
+    setDraftMarkersByType((prev) => ({
+      ...prev,
+      [activeWaterType]: [],
+    }));
+  }, [activeWaterType, draftMarkers]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Toolbar
         activeWaterType={activeWaterType}
         onWaterTypeChange={setActiveWaterType}
-        markerHistory={markers}
+        markerHistory={submittedMarkers}
         onHistoryItemClick={handleHistoryItemClick}
       />
       <main className="flex-1 p-6">
         <MyMap
-          markers={markers}
-          onMarkersChange={setMarkers}
+          draftMarkers={draftMarkers}
+          submittedMarkers={submittedMarkers}
+          onDraftMarkersChange={setDraftMarkers}
+          onSubmitDraftMarkers={handleSubmitDraftMarkers}
           mapRef={mapRef}
           waterType={activeWaterType}
         />

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, X, History } from "lucide-react";
 import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
+import { validateAndSnapLake } from "@/lib/validateAndSnapLake";
 
 export type MarkerColor = "red" | "blue" | "yellow" | "green";
 
@@ -49,6 +50,8 @@ export interface Marker {
   latitude: number;
   longitude: number;
   color?: MarkerColor;
+  /** Optional lake identifier when the point is associated with a lake */
+  lakeId?: string;
   turbidity: number;
   ph: number;
   temperature: number;
@@ -70,6 +73,135 @@ const COLORS: MarkerColor[] = ["red", "blue", "yellow", "green"];
 function randomInRange(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
+
+const WATER_TYPE_TILE_CONFIG: Record<
+  WaterType,
+  {
+    sourceId: string;
+    fillLayerId: string;
+    outlineLayerId: string;
+    tileUrl: string;
+    sourceLayer: string;
+    fillColor: string;
+    outlineColor: string;
+  }
+> = {
+  ponds: {
+    sourceId: "india-ponds",
+    fillLayerId: "india-ponds-fill",
+    outlineLayerId: "india-ponds-outline",
+    tileUrl: "http://localhost:8080/data/india_ponds/{z}/{x}/{y}.pbf",
+    sourceLayer: "ponds",
+    fillColor: "#3fa34d",
+    outlineColor: "#256d1b",
+  },
+  river: {
+    sourceId: "india-river",
+    fillLayerId: "india-river-fill",
+    outlineLayerId: "india-river-outline",
+    tileUrl: "http://localhost:8080/data/india_river/{z}/{x}/{y}.pbf",
+    sourceLayer: "river",
+    fillColor: "#2b8cbe",
+    outlineColor: "#155b7a",
+  },
+  lake: {
+    sourceId: "india-lakes",
+    fillLayerId: "india-lakes-fill",
+    outlineLayerId: "india-lakes-outline",
+    tileUrl: "http://localhost:8080/data/india_lakes/{z}/{x}/{y}.pbf",
+    sourceLayer: "lakes",
+    fillColor: "#4a90d9",
+    outlineColor: "#1a5fa8",
+  },
+};
+
+
+function WaterTypeLayer({ waterType }: { waterType: WaterType }) {
+  const { map, isLoaded } = useMap();
+  const layerConfig = WATER_TYPE_TILE_CONFIG[waterType];
+
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+
+    // Remove existing layers
+    if (map.getLayer(layerConfig.outlineLayerId)) {
+      map.removeLayer(layerConfig.outlineLayerId);
+    }
+
+    if (map.getLayer(layerConfig.fillLayerId)) {
+      map.removeLayer(layerConfig.fillLayerId);
+    }
+
+    // Remove source
+    if (map.getSource(layerConfig.sourceId)) {
+      map.removeSource(layerConfig.sourceId);
+    }
+
+    // Add vector tile source
+    map.addSource(layerConfig.sourceId, {
+      type: "vector",
+      tiles: [layerConfig.tileUrl],
+      minzoom: 5,
+      maxzoom: 13,
+    });
+
+    // Fill layer
+    map.addLayer({
+      id: layerConfig.fillLayerId,
+      type: "fill",
+      source: layerConfig.sourceId,
+      "source-layer": layerConfig.sourceLayer,
+      paint: {
+        "fill-color": layerConfig.fillColor,
+        "fill-opacity": 0.5,
+      },
+    });
+
+    // Outline layer
+    map.addLayer({
+      id: layerConfig.outlineLayerId,
+      type: "line",
+      source: layerConfig.sourceId,
+      "source-layer": layerConfig.sourceLayer,
+      paint: {
+        "line-color": layerConfig.outlineColor,
+        "line-width": 1,
+      },
+    });
+
+    // Debug click handler
+    const handleClick = (e: any) => {
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: [layerConfig.fillLayerId, layerConfig.outlineLayerId],
+      });
+
+      if (features.length === 0) {
+        console.debug("[VectorTile] No feature found");
+        return;
+      }
+
+      console.debug("[VectorTile] Features", features);
+    };
+
+    map.on("click", handleClick);
+
+    return () => {
+      map.off("click", handleClick);
+
+      if (map.getLayer(layerConfig.outlineLayerId))
+        map.removeLayer(layerConfig.outlineLayerId);
+
+      if (map.getLayer(layerConfig.fillLayerId))
+        map.removeLayer(layerConfig.fillLayerId);
+
+      if (map.getSource(layerConfig.sourceId))
+        map.removeSource(layerConfig.sourceId);
+    };
+  }, [map, isLoaded, layerConfig]);
+
+  return null;
+}
+
 
 function generateSampleMarkers(count: number, centerLng: number, centerLat: number): Marker[] {
   const markers: Marker[] = [];
@@ -99,16 +231,20 @@ interface TempPin {
   longitude: number;
 }
 
-function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
+function MapClickHandler({
+  onMapClick,
+}: {
+  onMapClick: (lat: number, lng: number) => void;
+}) {
   const { map, isLoaded } = useMap();
 
   useEffect(() => {
     if (!map || !isLoaded) return;
 
     const handleMapClick = (e: any) => {
-      // Use right-click (contextmenu) to add a temporary pin
       if (e.preventDefault) e.preventDefault();
       if (e.originalEvent?.preventDefault) e.originalEvent.preventDefault();
+
       const { lng, lat } = e.lngLat;
       onMapClick(lat, lng);
     };
@@ -123,18 +259,32 @@ function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number
   return null;
 }
 
+
 interface MyMapProps {
-  markers: Marker[];
-  onMarkersChange: (markers: Marker[]) => void;
+  draftMarkers: Marker[];
+  submittedMarkers: Marker[];
+  onDraftMarkersChange: (markers: Marker[]) => void;
+  onSubmitDraftMarkers: () => void;
   mapRef?: React.RefObject<MapRef | null>;
   waterType?: WaterType;
 }
 
-export function MyMap({ markers, onMarkersChange, mapRef: externalMapRef, waterType }: MyMapProps) {
+export function MyMap({
+  draftMarkers,
+  submittedMarkers,
+  onDraftMarkersChange,
+  onSubmitDraftMarkers,
+  mapRef: externalMapRef,
+  waterType,
+}: MyMapProps) {
   const internalMapRef = useRef<MapRef>(null);
   const mapRef = externalMapRef || internalMapRef;
+  const allMarkers = React.useMemo(
+    () => [...submittedMarkers, ...draftMarkers],
+    [submittedMarkers, draftMarkers]
+  );
   const [tempPin, setTempPin] = useState<TempPin | null>(null);
-const [latitude, setLatitude] = useState<string>("");
+  const [latitude, setLatitude] = useState<string>("");
   const [longitude, setLongitude] = useState<string>("");
   const [turbidity, setTurbidity] = useState<string>("");
   const [ph, setPh] = useState<string>("");
@@ -152,6 +302,28 @@ const [latitude, setLatitude] = useState<string>("");
   const [markerHistoryPanelMarker, setMarkerHistoryPanelMarker] = useState<Marker | null>(null);
   const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
   const [samplePointIds, setSamplePointIds] = useState<Set<string>>(new Set());
+  const [lakeId, setLakeId] = useState<string | null>(null);
+  const [isResolvingLakeId, setIsResolvingLakeId] = useState(false);
+
+  const submittedIdSet = React.useMemo(() => new Set(submittedMarkers.map((m) => m.id)), [submittedMarkers]);
+
+  const resetDraftFormState = useCallback(() => {
+    setEditingMarkerId(null);
+    setTempPin(null);
+    setLatitude("");
+    setLongitude("");
+    setTurbidity("");
+    setPh("");
+    setTemperature("");
+    setBod("");
+    setMarkerColor("red");
+    setConductivity("");
+    setAod("");
+    setSelectedAdditionalParams([]);
+    setLakeId(null);
+    setSelectedClusterPoint(null);
+    setMarkerHistoryPanelMarker(null);
+  }, []);
 
   useEffect(() => {
     if (markerHistoryPanelMarker) {
@@ -165,27 +337,41 @@ const [latitude, setLatitude] = useState<string>("");
     }
   }, [markerHistoryPanelMarker]);
 
+  // Ensure MapLibre correctly repaints when the slide-over opens/closes.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const t = requestAnimationFrame(() => {
+      try {
+        mapRef.current?.resize();
+        mapRef.current?.triggerRepaint();
+      } catch {
+        // ignore
+      }
+    });
+    return () => cancelAnimationFrame(t);
+  }, [markerHistoryPanelMarker, mapRef]);
+
   const handleAddSamplePoints = useCallback(() => {
     const centerLng = 77.209;
     const centerLat = 28.614;
     const newMarkers = generateSampleMarkers(50, centerLng, centerLat);
-    onMarkersChange([...markers, ...newMarkers]);
+    onDraftMarkersChange([...draftMarkers, ...newMarkers]);
     setSamplePointIds((prev) => {
       const next = new Set(prev);
       newMarkers.forEach((m) => next.add(m.id));
       return next;
     });
-  }, [markers, onMarkersChange]);
+  }, [draftMarkers, onDraftMarkersChange]);
 
   const handleDeleteSamplePoints = useCallback(() => {
     const idsToRemove = samplePointIds;
-    onMarkersChange(markers.filter((m) => !idsToRemove.has(m.id)));
+    onDraftMarkersChange(draftMarkers.filter((m) => !idsToRemove.has(m.id)));
     setSamplePointIds(new Set());
-  }, [markers, onMarkersChange, samplePointIds]);
+  }, [draftMarkers, onDraftMarkersChange, samplePointIds]);
 
   const markersGeoJSON = React.useMemo((): GeoJSON.FeatureCollection<GeoJSON.Point> => ({
     type: "FeatureCollection",
-    features: markers.map((marker) => ({
+    features: allMarkers.map((marker) => ({
       type: "Feature" as const,
       geometry: {
         type: "Point" as const,
@@ -196,6 +382,8 @@ const [latitude, setLatitude] = useState<string>("");
         color: marker.color ?? "red",
         colorIndex: COLOR_INDEX[marker.color ?? "red"],
         colorHex: MARKER_COLOR_HEX[marker.color ?? "red"],
+        lakeId: marker.lakeId,
+        isSubmitted: submittedMarkers.some((m) => m.id === marker.id),
         turbidity: marker.turbidity,
         ph: marker.ph,
         temperature: marker.temperature,
@@ -205,12 +393,91 @@ const [latitude, setLatitude] = useState<string>("");
         timestamp: marker.timestamp.toISOString(),
       },
     })),
-  }), [markers]);
+  }), [allMarkers, submittedMarkers]);
 
-  const handleAddMarker = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSetLakeId = useCallback(async () => {
+    if (waterType !== "lake") return;
+
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      alert("Please enter valid latitude and longitude values");
+      return;
+    }
+
+    if (!mapRef.current) {
+      alert("Map is not ready yet. Please try again in a moment.");
+      return;
+    }
+
+    setIsResolvingLakeId(true);
+    try {
+      // 1) Try vector tile first (fast, no backend)
+      const point = mapRef.current.project([lng, lat]);
+      console.debug("[LakeSet] Querying rendered features at coordinate", {
+        lng,
+        lat,
+        projectedPoint: point,
+        layer: WATER_TYPE_TILE_CONFIG.lake.fillLayerId,
+      });
+
+      const features = mapRef.current.queryRenderedFeatures(point, {
+        layers: [WATER_TYPE_TILE_CONFIG.lake.fillLayerId],
+      });
+
+      console.debug(
+        "[LakeSet] Features from vector tile",
+        features.length,
+        features.map((f: any) => ({
+          id: f.id,
+          properties: f.properties,
+          layerId: f.layer?.id,
+          source: f.source,
+          sourceLayer: f.sourceLayer,
+        }))
+      );
+
+      if (features.length > 0) {
+        const props = features[0].properties as Record<string, unknown> | undefined;
+        const foundLakeId =
+          (props?.Hylak_id as string) ??
+          (props?.hylak_id as string) ??
+          (props?.lake_id as string);
+
+        if (foundLakeId) {
+          setLakeId(String(foundLakeId));
+          console.debug("[LakeSet] Using lakeId from vector tile", foundLakeId);
+          return;
+        }
+      }
+
+      // 2) Fallback to backend validation/snapping
+      console.debug("[LakeSet] Falling back to backend validate/snap", { lng, lat });
+      const result = await validateAndSnapLake(lat, lng);
+      if (!result) {
+        setLakeId(null);
+        alert("Point is not inside a lake and no lake was found within snapping distance (50m).");
+        return;
+      }
+
+      setLakeId(result.lakeId);
+      setLatitude(result.latitude.toString());
+      setLongitude(result.longitude.toString());
+      setTempPin({ latitude: result.latitude, longitude: result.longitude });
+      console.debug("[LakeSet] Backend resolved lake", result);
+    } catch (error) {
+      console.error("[LakeSet] Failed to resolve lakeId", error);
+      alert("Unable to resolve lake_id. Please try again.");
+    } finally {
+      setIsResolvingLakeId(false);
+    }
+  }, [waterType, latitude, longitude, mapRef]);
+
+  const handleAddMarker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let lat = parseFloat(latitude);
+    let lng = parseFloat(longitude);
 
     if (isNaN(lat) || isNaN(lng)) {
       alert("Please enter valid latitude and longitude values");
@@ -227,9 +494,16 @@ const [latitude, setLatitude] = useState<string>("");
       return;
     }
 
-    // Enforce minimum 20m distance between points
+    // For lakes, resolve lake_id explicitly via the Set button.
+    const resolvedLakeId = lakeId;
+    if (waterType === "lake" && !resolvedLakeId) {
+      alert('Please press "Set" to resolve lake_id before saving.');
+      return;
+    }
+
+    // Enforce minimum 20m distance between points (draft+submitted, using possibly snapped coordinates)
     const newPoint = turf.point([lng, lat]);
-    const tooClose = markers.some((marker) => {
+    const tooClose = allMarkers.some((marker) => {
       // When editing, ignore the marker being edited in distance check
       if (editingMarkerId && marker.id === editingMarkerId) return false;
       const existingPoint = turf.point([marker.longitude, marker.latitude]);
@@ -267,23 +541,24 @@ const turb = parseFloat(turbidity);
 
     if (editingMarkerId) {
       // Update existing marker
-       const updatedMarkers = markers.map(marker => 
-         marker.id === editingMarkerId 
-           ? { 
-               ...marker, 
-               latitude: lat, 
-               longitude: lng, 
-               color: markerColor,
-               turbidity: turb, 
-               ph: phVal, 
-               temperature: temp, 
-               bod: bodVal,
-               conductivity: condVal,
-               aod: aodVal,
-             }
-           : marker
-       );
-       onMarkersChange(updatedMarkers);
+      const updatedMarkers = draftMarkers.map((marker) =>
+        marker.id === editingMarkerId
+          ? {
+              ...marker,
+              latitude: lat,
+              longitude: lng,
+              color: markerColor,
+              lakeId: resolvedLakeId ?? marker.lakeId,
+              turbidity: turb,
+              ph: phVal,
+              temperature: temp,
+              bod: bodVal,
+              conductivity: condVal,
+              aod: aodVal,
+            }
+          : marker
+      );
+      onDraftMarkersChange(updatedMarkers);
        setEditingMarkerId(null);
      } else {
        // Add new marker
@@ -292,6 +567,7 @@ const turb = parseFloat(turbidity);
          latitude: lat,
          longitude: lng,
          color: markerColor,
+         lakeId: resolvedLakeId ?? undefined,
          turbidity: turb,
          ph: phVal,
          temperature: temp,
@@ -300,8 +576,8 @@ const turb = parseFloat(turbidity);
          aod: aodVal,
          timestamp: new Date(),
        };
-       const updatedMarkers = [...markers, newMarker];
-       onMarkersChange(updatedMarkers);
+      const updatedMarkers = [...draftMarkers, newMarker];
+      onDraftMarkersChange(updatedMarkers);
      }
     setLatitude("");
     setLongitude("");
@@ -314,11 +590,12 @@ const turb = parseFloat(turbidity);
     setAod("");
     setSelectedAdditionalParams([]);
     setTempPin(null);
+    setLakeId(null);
   };
 
   const handleRemoveMarker = (id: string) => {
-    const updatedMarkers = markers.filter((marker) => marker.id !== id);
-    onMarkersChange(updatedMarkers);
+    const updatedMarkers = draftMarkers.filter((marker) => marker.id !== id);
+    onDraftMarkersChange(updatedMarkers);
     if (samplePointIds.has(id)) {
       setSamplePointIds((prev) => {
         const next = new Set(prev);
@@ -338,6 +615,7 @@ const turb = parseFloat(turbidity);
       setConductivity("");
       setAod("");
       setSelectedAdditionalParams([]);
+      setLakeId(null);
     }
     setSelectedClusterPoint(null);
   };
@@ -351,6 +629,7 @@ const turb = parseFloat(turbidity);
     setPh(marker.ph.toString());
     setTemperature(marker.temperature.toString());
     setBod(marker.bod.toString());
+    setLakeId(marker.lakeId ?? null);
     
     // Set additional params if they exist
     const additionalParams: AdditionalParamKey[] = [];
@@ -381,6 +660,7 @@ const turb = parseFloat(turbidity);
     setConductivity("");
     setAod("");
     setSelectedAdditionalParams([]);
+    setLakeId(null);
     setSelectedClusterPoint(null);
   };
 
@@ -403,12 +683,17 @@ const turb = parseFloat(turbidity);
   };
 
 
-  const handleMapClick = useCallback((lat: number, lng: number) => {
-    setTempPin({ latitude: lat, longitude: lng });
-    setLatitude(lat.toString());
-    setLongitude(lng.toString());
-    setSelectedClusterPoint(null);
-  }, []);
+  const handleMapClick = useCallback(
+    (lat: number, lng: number) => {
+      setTempPin({ latitude: lat, longitude: lng });
+      setLatitude(lat.toString());
+      setLongitude(lng.toString());
+      setSelectedClusterPoint(null);
+      // lake_id is resolved only when the user presses Set
+      setLakeId(null);
+    },
+    []
+  );
 
   // For now, history is the marker's current data as a single "recent" entry. Replace with backend fetch later.
   const pointHistoryEntries = markerHistoryPanelMarker
@@ -428,11 +713,57 @@ const turb = parseFloat(turbidity);
   return (
     <div className="flex gap-4 w-full relative">
       <Card className="flex-1 h-[500px] p-0 overflow-hidden">
-        <Map ref={mapRef} center={[77.2090, 28.6139]} zoom={5} theme="light">
+        <Map
+  ref={mapRef}
+  center={[77.2090, 28.6139]}
+  zoom={5}
+ styles={{
+  light: {
+    version: 8,
+    sources: {
+      "esri-satellite": {
+        type: "raster",
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        attribution: "Tiles © Esri",
+      },
+      "esri-labels": {
+        type: "raster",
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+      },
+    },
+    layers: [
+      { id: "esri-satellite-layer", type: "raster", source: "esri-satellite" },
+      { id: "esri-labels-layer", type: "raster", source: "esri-labels" },  // roads, cities, borders on top
+    ],
+  },
+  dark: {
+    version: 8,
+    sources: {
+      "esri-satellite": {
+        type: "raster",
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        attribution: "Tiles © Esri",
+      },
+      "esri-labels": {
+        type: "raster",
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+      },
+    },
+    layers: [
+      { id: "esri-satellite-layer", type: "raster", source: "esri-satellite" },
+      { id: "esri-labels-layer", type: "raster", source: "esri-labels" },
+    ],
+  },
+}}
+>
           <MapControls showLocate={true} />
           <MapClickHandler onMapClick={handleMapClick} />
-
-          {markers.length > 0 && (
+          {waterType && <WaterTypeLayer key={waterType} waterType={waterType} />}
+          {allMarkers.length > 0 && (
             <MapClusterLayer
               data={markersGeoJSON}
               clusterRadius={60}
@@ -443,13 +774,20 @@ const turb = parseFloat(turbidity);
               pointColorProperty="colorHex"
               onPointClick={(feature, coordinates) => {
                 const markerId = feature.properties?.id;
-                const marker = markers.find((m) => m.id === markerId);
+                const marker = allMarkers.find((m) => m.id === markerId);
                 if (marker) {
                   setSelectedClusterPoint({ coordinates, marker });
-                  setMarkerHistoryPanelMarker(marker);
+                  // Only show point history for submitted (locked) markers
+                  if (submittedIdSet.has(marker.id)) {
+                    setMarkerHistoryPanelMarker(marker);
+                  } else {
+                    setMarkerHistoryPanelMarker(null);
+                  }
                 }
               }}
               onClusterClick={(clusterId, coordinates, pointCount) => {
+                void clusterId;
+                void pointCount;
                 if (mapRef.current) {
                   mapRef.current.flyTo({
                     center: coordinates,
@@ -478,7 +816,16 @@ const turb = parseFloat(turbidity);
                 longitude={tempPin.longitude}
                 latitude={tempPin.latitude}
                 closeButton={true}
-                onClose={() => setTempPin(null)}
+                onClose={() => {
+                  setTempPin(null);
+                  // If we were creating a new marker from this temp pin,
+                  // clear the coordinate and lake association when user closes it.
+                  if (!editingMarkerId) {
+                    setLatitude("");
+                    setLongitude("");
+                    setLakeId(null);
+                  }
+                }}
               >
                 <div className="text-sm">
                   <p className="font-medium mb-1">Coordinates</p>
@@ -542,25 +889,31 @@ const turb = parseFloat(turbidity);
                   )}
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      handleEditMarker(selectedClusterPoint.marker);
-                      setSelectedClusterPoint(null);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => {
-                      handleRemoveMarker(selectedClusterPoint.marker.id);
-                      setSelectedClusterPoint(null);
-                    }}
-                  >
-                    Remove
-                  </Button>
+                  {!submittedIdSet.has(selectedClusterPoint.marker.id) ? (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          handleEditMarker(selectedClusterPoint.marker);
+                          setSelectedClusterPoint(null);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          handleRemoveMarker(selectedClusterPoint.marker.id);
+                          setSelectedClusterPoint(null);
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Submitted point (locked)</p>
+                  )}
                 </div>
               </div>
             </MapPopup>
@@ -611,6 +964,22 @@ const turb = parseFloat(turbidity);
                 />
               </div>
             </div>
+
+            {waterType === "lake" && (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSetLakeId}
+                  disabled={isResolvingLakeId || !latitude || !longitude}
+                >
+                  {isResolvingLakeId ? "Setting..." : "Set"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  {lakeId ? `lake_id: ${lakeId}` : "Resolve lake_id for the entered coordinates"}
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Marker color</label>
@@ -693,6 +1062,17 @@ const turb = parseFloat(turbidity);
                 </div>
               </div>
             </div>
+
+            {waterType === "lake" && (
+              <div className="pt-2 border-t">
+                <p className="text-sm font-medium mb-1">Lake association</p>
+                <p className="text-xs text-muted-foreground">
+                  {lakeId
+                    ? `Linked lake_id: ${lakeId}`
+                    : 'Right-click on the map (or enter coordinates) and press "Set" to resolve the lake_id. '}
+                </p>
+              </div>
+            )}
 
             <div className="pt-2 border-t">
               <div className="flex items-center justify-between mb-3">
@@ -792,6 +1172,23 @@ const turb = parseFloat(turbidity);
                 </Button>
               )}
             </div>
+
+            {draftMarkers.length > 0 && (
+              <Button
+                type="button"
+                variant="default"
+                className="w-full"
+                onClick={() => {
+                  onSubmitDraftMarkers();
+                  // Ensure draft list is cleared immediately in this view as well.
+                  onDraftMarkersChange([]);
+                  // After submit, clear draft state for next entries
+                  resetDraftFormState();
+                }}
+              >
+                Submit ({draftMarkers.length})
+              </Button>
+            )}
           </form>
 
           <div className="mt-4 pt-4 border-t space-y-2">
@@ -808,13 +1205,16 @@ const turb = parseFloat(turbidity);
             </div>
           </div>
 
-{markers.length > 0 && (
+          {draftMarkers.length > 0 && (
             <div className="mt-4 pt-4 border-t">
               <p className="text-sm font-medium mb-2">
-                Markers ({markers.length}){waterType && ` — ${WATER_TYPE_LABELS[waterType]}`}
+                Draft markers ({draftMarkers.length}){waterType && ` — ${WATER_TYPE_LABELS[waterType]}`}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  Submitted in history: {submittedMarkers.length}
+                </span>
               </p>
               <div className="space-y-2 max-h-60 overflow-y-auto">
-                {markers.map((marker) => (
+                {draftMarkers.map((marker) => (
                   <div
                     key={marker.id}
                     role="button"
@@ -882,11 +1282,7 @@ const turb = parseFloat(turbidity);
       {/* Point history slide-over panel (opens when clicking a marker on the map) */}
       {markerHistoryPanelMarker && (
         <>
-          <div
-            className="fixed inset-0 z-40 bg-black/50 transition-opacity"
-            aria-hidden
-            onClick={() => setMarkerHistoryPanelMarker(null)}
-          />
+          {/* Backdrop removed to avoid obscuring the map; close via X button */}
           <aside
             className={`fixed right-0 top-0 z-50 h-full w-full max-w-md bg-card border-l border-border shadow-xl flex flex-col transition-transform duration-300 ease-out ${
               historyPanelVisible ? "translate-x-0" : "translate-x-full"
