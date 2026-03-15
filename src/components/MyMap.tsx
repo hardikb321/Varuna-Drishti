@@ -6,7 +6,7 @@ import React from "react"
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import * as turf from "@turf/turf";
-import { Map, MapControls, MapMarker, MarkerContent, MapClusterLayer, MapPopup, type MapRef, useMap } from "@/components/ui/map";
+import { Map, MapControls, MapMarker, MarkerContent, MapClusterLayer, MapDraftPointsLayer, MapPopup, type MapRef, useMap } from "@/components/ui/map";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -337,14 +337,6 @@ export function MyMap({
     () => [...submittedMarkers, ...draftMarkers],
     [submittedMarkers, draftMarkers]
   );
-  // Markers that are actually rendered on the map.
-  // While a submission is "processing", hide the draft markers from the map
-  // but keep them in the UI so the user can still see/edit them after the
-  // accept/reject step.
-  const mapMarkers = React.useMemo(
-    () => (isSubmittingDraft ? submittedMarkers : allMarkers),
-    [isSubmittingDraft, submittedMarkers, allMarkers]
-  );
 
   const submittedIdSet = React.useMemo(() => new Set(submittedMarkers.map((m) => m.id)), [submittedMarkers]);
 
@@ -410,31 +402,45 @@ export function MyMap({
     setSamplePointIds(new Set());
   }, [draftMarkers, onDraftMarkersChange, samplePointIds]);
 
-  const markersGeoJSON = React.useMemo((): GeoJSON.FeatureCollection<GeoJSON.Point> => ({
-    type: "FeatureCollection",
-    features: mapMarkers.map((marker) => ({
-      type: "Feature" as const,
-      geometry: {
-        type: "Point" as const,
-        coordinates: [marker.longitude, marker.latitude],
-      },
-      properties: {
-        id: marker.id,
-        color: marker.color ?? "red",
-        colorIndex: COLOR_INDEX[marker.color ?? "red"],
-        colorHex: MARKER_COLOR_HEX[marker.color ?? "red"],
-        lakeId: marker.lakeId,
-        isSubmitted: submittedMarkers.some((m) => m.id === marker.id),
-        turbidity: marker.turbidity,
-        ph: marker.ph,
-        temperature: marker.temperature,
-        bod: marker.bod,
-        conductivity: marker.conductivity,
-        aod: marker.aod,
-        timestamp: marker.timestamp.toISOString(),
-      },
-    })),
-  }), [mapMarkers, submittedMarkers]);
+  const toPointFeature = (marker: Marker) => ({
+    type: "Feature" as const,
+    geometry: {
+      type: "Point" as const,
+      coordinates: [marker.longitude, marker.latitude] as [number, number],
+    },
+    properties: {
+      id: marker.id,
+      color: marker.color ?? "red",
+      colorIndex: COLOR_INDEX[marker.color ?? "red"],
+      colorHex: MARKER_COLOR_HEX[marker.color ?? "red"],
+      lakeId: marker.lakeId,
+      turbidity: marker.turbidity,
+      ph: marker.ph,
+      temperature: marker.temperature,
+      bod: marker.bod,
+      conductivity: marker.conductivity,
+      aod: marker.aod,
+      timestamp: marker.timestamp.toISOString(),
+    },
+  });
+
+  // Clustering only for submitted points (e.g. from backend later).
+  const submittedMarkersGeoJSON = React.useMemo(
+    (): GeoJSON.FeatureCollection<GeoJSON.Point> => ({
+      type: "FeatureCollection",
+      features: submittedMarkers.map(toPointFeature),
+    }),
+    [submittedMarkers]
+  );
+
+  // Draft points: no clustering, shown with pulsing style in a separate layer.
+  const draftMarkersGeoJSON = React.useMemo(
+    (): GeoJSON.FeatureCollection<GeoJSON.Point> => ({
+      type: "FeatureCollection",
+      features: draftMarkers.map(toPointFeature),
+    }),
+    [draftMarkers]
+  );
 
   const handleSetLakeId = useCallback(async () => {
     if (waterType !== "lake") return;
@@ -820,9 +826,10 @@ const turb = parseFloat(turbidity);
           <MapControls showLocate={true} />
           <MapClickHandler onMapClick={handleMapClick} />
           {waterType && <WaterTypeLayer key={waterType} waterType={waterType} />}
-          {allMarkers.length > 0 && (
+          {/* Submitted points only: clustered (backend data would go here). */}
+          {submittedMarkers.length > 0 && (
             <MapClusterLayer
-              data={markersGeoJSON}
+              data={submittedMarkersGeoJSON}
               clusterRadius={60}
               clusterMaxZoom={14}
               clusterColorByMajority
@@ -831,15 +838,10 @@ const turb = parseFloat(turbidity);
               pointColorProperty="colorHex"
               onPointClick={(feature, coordinates) => {
                 const markerId = feature.properties?.id;
-                const marker = allMarkers.find((m) => m.id === markerId);
+                const marker = submittedMarkers.find((m) => m.id === markerId);
                 if (marker) {
                   setSelectedClusterPoint({ coordinates, marker });
-                  // Only show point history for submitted (locked) markers
-                  if (submittedIdSet.has(marker.id)) {
-                    setMarkerHistoryPanelMarker(marker);
-                  } else {
-                    setMarkerHistoryPanelMarker(null);
-                  }
+                  setMarkerHistoryPanelMarker(marker);
                 }
               }}
               onClusterClick={(clusterId, coordinates, pointCount) => {
@@ -851,6 +853,22 @@ const turb = parseFloat(turbidity);
                     zoom: Math.min(mapRef.current.getZoom() + 2, 14),
                     duration: 1000,
                   });
+                }
+              }}
+            />
+          )}
+          {/* Draft points: no clustering, pulsing style so they stand out. */}
+          {draftMarkers.length > 0 && (
+            <MapDraftPointsLayer
+              data={draftMarkersGeoJSON}
+              pointColor="#f59e0b"
+              pointColorProperty="colorHex"
+              onPointClick={(feature, coordinates) => {
+                const markerId = feature.properties?.id;
+                const marker = draftMarkers.find((m) => m.id === markerId);
+                if (marker) {
+                  setSelectedClusterPoint({ coordinates, marker });
+                  setMarkerHistoryPanelMarker(null);
                 }
               }}
             />

@@ -1411,6 +1411,135 @@ function MapClusterLayer<
   return null;
 }
 
+type MapDraftPointsLayerProps<
+  P extends GeoJSON.GeoJsonProperties = GeoJSON.GeoJsonProperties
+> = {
+  /** GeoJSON FeatureCollection of draft (unsubmitted) points. No clustering. */
+  data: GeoJSON.FeatureCollection<GeoJSON.Point, P>;
+  /** Circle fill color (default: amber/orange tint) */
+  pointColor?: string;
+  /** Property on each feature for circle color (e.g. "colorHex") */
+  pointColorProperty?: string;
+  /** Callback when a draft point is clicked */
+  onPointClick?: (
+    feature: GeoJSON.Feature<GeoJSON.Point, P>,
+    coordinates: [number, number]
+  ) => void;
+};
+
+function MapDraftPointsLayer<
+  P extends GeoJSON.GeoJsonProperties = GeoJSON.GeoJsonProperties
+>({
+  data,
+  pointColor = "#f59e0b",
+  pointColorProperty,
+  onPointClick,
+}: MapDraftPointsLayerProps<P>) {
+  const { map, isLoaded } = useMap();
+  const id = useId();
+  const sourceId = `draft-points-source-${id}`;
+  const layerId = `draft-points-${id}`;
+  const pulseRef = useRef({ radius: 8, step: 1 });
+
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    map.addSource(sourceId, {
+      type: "geojson",
+      data,
+    });
+
+    const circleColor = pointColorProperty
+      ? (["coalesce", ["get", pointColorProperty], pointColor] as MapLibreGL.ExpressionSpecification)
+      : pointColor;
+
+    map.addLayer({
+      id: layerId,
+      type: "circle",
+      source: sourceId,
+      paint: {
+        "circle-radius": pulseRef.current.radius,
+        "circle-color": circleColor,
+        "circle-opacity": 0.9,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+
+    return () => {
+      try {
+        if (map.getLayer(layerId)) map.removeLayer(layerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch {
+        // ignore
+      }
+    };
+  }, [isLoaded, map, sourceId, layerId, pointColor, pointColorProperty]);
+
+  useEffect(() => {
+    if (!isLoaded || !map || typeof data === "string") return;
+    const source = map.getSource(sourceId) as MapLibreGL.GeoJSONSource;
+    if (source) source.setData(data);
+  }, [isLoaded, map, data, sourceId]);
+
+  // Pulsing animation: alternate circle-radius between 6 and 12
+  useEffect(() => {
+    if (!isLoaded || !map || !map.getLayer(layerId)) return;
+    const interval = setInterval(() => {
+      const r = pulseRef.current;
+      r.radius += r.step;
+      if (r.radius >= 12) {
+        r.radius = 12;
+        r.step = -1;
+      } else if (r.radius <= 6) {
+        r.radius = 6;
+        r.step = 1;
+      }
+      try {
+        map.setPaintProperty(layerId, "circle-radius", r.radius);
+      } catch {
+        // ignore if layer removed
+      }
+    }, 120);
+    return () => clearInterval(interval);
+  }, [isLoaded, map, layerId]);
+
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+    const handleClick = (
+      e: MapLibreGL.MapMouseEvent & { features?: MapLibreGL.MapGeoJSONFeature[] }
+    ) => {
+      if (!onPointClick || !e.features?.length) return;
+      const feature = e.features[0];
+      const coordinates = (feature.geometry as GeoJSON.Point).coordinates.slice() as [
+        number,
+        number
+      ];
+      while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+        coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+      }
+      onPointClick(feature as unknown as GeoJSON.Feature<GeoJSON.Point, P>, coordinates);
+    };
+    map.on("click", layerId, handleClick);
+    const onEnter = () => {
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const onLeave = () => {
+      map.getCanvas().style.cursor = "";
+    };
+    map.on("mouseenter", layerId, onEnter);
+    map.on("mouseleave", layerId, onLeave);
+    return () => {
+      map.off("click", layerId, handleClick);
+      map.off("mouseenter", layerId, onEnter);
+      map.off("mouseleave", layerId, onLeave);
+      map.getCanvas().style.cursor = "";
+    };
+  }, [isLoaded, map, layerId, onPointClick]);
+
+  return null;
+}
+
 export {
   Map,
   useMap,
@@ -1423,6 +1552,7 @@ export {
   MapControls,
   MapRoute,
   MapClusterLayer,
+  MapDraftPointsLayer,
 };
 
 export type { MapRef };
