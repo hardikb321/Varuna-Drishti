@@ -10,7 +10,7 @@ import { Map, MapControls, MapMarker, MarkerContent, MapClusterLayer, MapDraftPo
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, X, History } from "lucide-react";
+import { ChevronDown, X, History, BarChart2 } from "lucide-react";
 import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
 import { validateAndSnapLake } from "@/lib/validateAndSnapLake";
@@ -321,6 +321,7 @@ export function MyMap({
   } | null>(null);
   const [markerHistoryPanelMarker, setMarkerHistoryPanelMarker] = useState<Marker | null>(null);
   const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
+  const [pointHistoryPanelTab, setPointHistoryPanelTab] = useState<"history" | "charts">("history");
   const [samplePointIds, setSamplePointIds] = useState<Set<string>>(new Set());
   const [lakeId, setLakeId] = useState<string | null>(null);
   const [isResolvingLakeId, setIsResolvingLakeId] = useState(false);
@@ -361,6 +362,7 @@ export function MyMap({
   useEffect(() => {
     if (markerHistoryPanelMarker) {
       setHistoryPanelVisible(false);
+      setPointHistoryPanelTab("history");
       const t = requestAnimationFrame(() => {
         requestAnimationFrame(() => setHistoryPanelVisible(true));
       });
@@ -383,6 +385,33 @@ export function MyMap({
     });
     return () => cancelAnimationFrame(t);
   }, [markerHistoryPanelMarker, mapRef]);
+
+  // Warn on refresh/close when there are unsaved changes or pending actions.
+  const hasUnsavedChangesRef = useRef(false);
+  const formOrDraftDirty =
+    draftMarkers.length > 0 ||
+    isSubmittingDraft ||
+    tempPin !== null ||
+    editingMarkerId !== null ||
+    latitude !== "" ||
+    longitude !== "" ||
+    turbidity !== "" ||
+    ph !== "" ||
+    temperature !== "" ||
+    bod !== "";
+  useEffect(() => {
+    hasUnsavedChangesRef.current = formOrDraftDirty;
+  }, [formOrDraftDirty]);
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChangesRef.current) {
+        e.preventDefault();
+        (e as unknown as { returnValue: string }).returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const handleAddSamplePoints = useCallback(() => {
     const centerLng = 77.209;
@@ -1475,21 +1504,55 @@ const turb = parseFloat(turbidity);
         </CardContent>
       </Card>
 
-      {/* Point history slide-over panel (opens when clicking a marker on the map) */}
+      {/* Point history slide-over panel with History / Charts tabs on left boundary */}
       {markerHistoryPanelMarker && (
-        <>
-          {/* Backdrop removed to avoid obscuring the map; close via X button */}
-          <aside
-            className={`fixed right-0 top-0 z-50 h-full w-full max-w-md bg-card border-l border-border shadow-xl flex flex-col transition-transform duration-300 ease-out ${
-              historyPanelVisible ? "translate-x-0" : "translate-x-full"
-            }`}
-            role="dialog"
-            aria-label="Point history"
-          >
+        <div
+          className={`fixed right-0 top-0 z-50 h-full flex transition-transform duration-300 ease-out ${
+            historyPanelVisible ? "translate-x-0" : "translate-x-full"
+          }`}
+          role="dialog"
+          aria-label="Point history and charts"
+        >
+          {/* Protruding tabs on the left edge of the box */}
+          <div className="flex flex-col gap-1 self-center py-4 -mr-px">
+            <button
+              type="button"
+              onClick={() => setPointHistoryPanelTab("history")}
+              className={`flex items-center justify-center w-11 h-14 rounded-l-md border border-r-0 border-border shadow-md text-xs font-medium transition-colors ${
+                pointHistoryPanelTab === "history"
+                  ? "bg-card text-foreground"
+                  : "bg-muted/80 text-muted-foreground hover:bg-muted"
+              }`}
+              title="History"
+              aria-pressed={pointHistoryPanelTab === "history"}
+            >
+              <span className="[writing-mode:vertical-rl] rotate-180">History</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPointHistoryPanelTab("charts")}
+              className={`flex items-center justify-center w-11 h-14 rounded-l-md border border-r-0 border-border shadow-md text-xs font-medium transition-colors ${
+                pointHistoryPanelTab === "charts"
+                  ? "bg-card text-foreground"
+                  : "bg-muted/80 text-muted-foreground hover:bg-muted"
+              }`}
+              title="Charts"
+              aria-pressed={pointHistoryPanelTab === "charts"}
+            >
+              <span className="[writing-mode:vertical-rl] rotate-180">Charts</span>
+            </button>
+          </div>
+
+          {/* Main panel content */}
+          <aside className="w-full max-w-md h-full bg-card border-l border-border shadow-xl flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <h2 className="font-semibold text-lg flex items-center gap-2">
-                <History className="h-5 w-5 text-muted-foreground" />
-                Point History
+                {pointHistoryPanelTab === "history" ? (
+                  <History className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <BarChart2 className="h-5 w-5 text-muted-foreground" />
+                )}
+                {pointHistoryPanelTab === "history" ? "Point History" : "Charts"}
               </h2>
               <Button
                 type="button"
@@ -1503,41 +1566,52 @@ const turb = parseFloat(turbidity);
               </Button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
-              <p className="text-sm text-muted-foreground mb-3">
-                {markerHistoryPanelMarker.latitude.toFixed(4)}, {markerHistoryPanelMarker.longitude.toFixed(4)}
-              </p>
-              <p className="text-xs text-muted-foreground mb-4">
-                Recent data for this point. History will be loaded from the backend.
-              </p>
-              <ul className="space-y-3">
-                {pointHistoryEntries.map((entry, index) => (
-                  <li
-                    key={index}
-                    className="p-4 rounded-lg border border-border bg-muted/30 space-y-2"
-                  >
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {entry.timestamp instanceof Date
-                        ? entry.timestamp.toLocaleString()
-                        : new Date(entry.timestamp).toLocaleString()}
-                    </p>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div><span className="text-muted-foreground">Turbidity:</span> {entry.turbidity} NTU</div>
-                      <div><span className="text-muted-foreground">pH:</span> {entry.ph}</div>
-                      <div><span className="text-muted-foreground">Temp:</span> {entry.temperature}°C</div>
-                      <div><span className="text-muted-foreground">BOD:</span> {entry.bod} mg/L</div>
-                      {entry.conductivity != null && (
-                        <div><span className="text-muted-foreground">Conductivity:</span> {entry.conductivity} μS/cm</div>
-                      )}
-                      {entry.aod != null && (
-                        <div><span className="text-muted-foreground">AOD:</span> {entry.aod}</div>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              {pointHistoryPanelTab === "history" && (
+                <>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    {markerHistoryPanelMarker.latitude.toFixed(4)}, {markerHistoryPanelMarker.longitude.toFixed(4)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Recent data for this point. History will be loaded from the backend.
+                  </p>
+                  <ul className="space-y-3">
+                    {pointHistoryEntries.map((entry, index) => (
+                      <li
+                        key={index}
+                        className="p-4 rounded-lg border border-border bg-muted/30 space-y-2"
+                      >
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {entry.timestamp instanceof Date
+                            ? entry.timestamp.toLocaleString()
+                            : new Date(entry.timestamp).toLocaleString()}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div><span className="text-muted-foreground">Turbidity:</span> {entry.turbidity} NTU</div>
+                          <div><span className="text-muted-foreground">pH:</span> {entry.ph}</div>
+                          <div><span className="text-muted-foreground">Temp:</span> {entry.temperature}°C</div>
+                          <div><span className="text-muted-foreground">BOD:</span> {entry.bod} mg/L</div>
+                          {entry.conductivity != null && (
+                            <div><span className="text-muted-foreground">Conductivity:</span> {entry.conductivity} μS/cm</div>
+                          )}
+                          {entry.aod != null && (
+                            <div><span className="text-muted-foreground">AOD:</span> {entry.aod}</div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {pointHistoryPanelTab === "charts" && (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                  <BarChart2 className="h-12 w-12 mb-4 opacity-50" />
+                  <p className="text-sm font-medium">Charts</p>
+                  <p className="text-xs mt-1">Charts for this point will be implemented here.</p>
+                </div>
+              )}
             </div>
           </aside>
-        </>
+        </div>
       )}
     </div>
   );
