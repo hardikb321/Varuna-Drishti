@@ -1,16 +1,16 @@
 import { Link } from "react-router-dom";
 import { ProfileDropdown } from "./ProfileDropdown";
-import type { Marker } from "./MyMap";
+import type { Session } from "./MyMap";
 import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
-
-type MarkerHistory = Marker;
 
 interface ToolbarProps {
   activeWaterType: WaterType;
   onWaterTypeChange: (type: WaterType) => void;
-  markerHistory?: MarkerHistory[];
+  sessionHistory?: Session[];
   onHistoryItemClick?: (markerId: string) => void;
+  onRejectedSessionClick?: (sessionId: string) => void;
+  isProcessingSubmit?: boolean;
 }
 
 // Mock user data - replace with actual user data from your auth system
@@ -24,8 +24,10 @@ const mockUser = {
 export function Toolbar({
   activeWaterType,
   onWaterTypeChange,
-  markerHistory = [],
+  sessionHistory = [],
   onHistoryItemClick,
+  onRejectedSessionClick,
+  isProcessingSubmit,
 }: ToolbarProps) {
   return (
     <header className="w-full border-b border-border bg-card">
@@ -59,8 +61,10 @@ export function Toolbar({
           </Link>
           <ProfileDropdown
             user={mockUser}
-            history={markerHistory}
+            history={sessionHistory}
             onHistoryItemClick={onHistoryItemClick}
+            onRejectedSessionClick={onRejectedSessionClick}
+            isProcessingSubmit={isProcessingSubmit}
           />
         </div>
       </div>

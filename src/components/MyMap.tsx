@@ -45,6 +45,9 @@ const MARKER_COLOR_HEX_ARRAY: [string, string, string, string] = [
   "#22c55e",
 ];
 
+// Sample lake IDs for test data so that pagination over lakes can be exercised.
+const SAMPLE_LAKE_IDS: string[] = Array.from({ length: 15 }, (_, i) => `TEST_LAKE_${i + 1}`);
+
 export interface Marker {
   id: string;
   latitude: number;
@@ -59,6 +62,14 @@ export interface Marker {
   conductivity?: number;
   aod?: number;
   timestamp: Date;
+}
+
+export interface Session {
+  id: string;
+  createdAt: Date;
+  waterType: WaterType;
+  markers: Marker[];
+  status: "accepted" | "rejected";
 }
 
 const ADDITIONAL_PARAMETERS = [
@@ -218,11 +229,13 @@ function generateSampleMarkers(count: number, centerLng: number, centerLat: numb
     const lat = centerLat + randomInRange(-spreadLat, spreadLat);
     const lng = centerLng + randomInRange(-spreadLng, spreadLng);
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const lakeId = SAMPLE_LAKE_IDS[i % SAMPLE_LAKE_IDS.length];
     markers.push({
       id: `sample-${Date.now()}-${i}`,
       latitude: lat,
       longitude: lng,
       color,
+      lakeId,
       turbidity: randomInRange(1, 25),
       ph: randomInRange(6, 8.5),
       temperature: randomInRange(15, 32),
@@ -271,7 +284,9 @@ interface MyMapProps {
   draftMarkers: Marker[];
   submittedMarkers: Marker[];
   onDraftMarkersChange: (markers: Marker[]) => void;
-  onSubmitDraftMarkers: () => void;
+  onSubmitDraftMarkers: (markers: Marker[]) => void;
+  onRejectDraftSession?: (markers: Marker[]) => void;
+  onProcessingChange?: (locked: boolean) => void;
   mapRef?: React.RefObject<MapRef | null>;
   waterType?: WaterType;
 }
@@ -281,15 +296,13 @@ export function MyMap({
   submittedMarkers,
   onDraftMarkersChange,
   onSubmitDraftMarkers,
+  onRejectDraftSession,
+  onProcessingChange,
   mapRef: externalMapRef,
   waterType,
 }: MyMapProps) {
   const internalMapRef = useRef<MapRef>(null);
   const mapRef = externalMapRef || internalMapRef;
-  const allMarkers = React.useMemo(
-    () => [...submittedMarkers, ...draftMarkers],
-    [submittedMarkers, draftMarkers]
-  );
   const [tempPin, setTempPin] = useState<TempPin | null>(null);
   const [latitude, setLatitude] = useState<string>("");
   const [longitude, setLongitude] = useState<string>("");
@@ -311,6 +324,27 @@ export function MyMap({
   const [samplePointIds, setSamplePointIds] = useState<Set<string>>(new Set());
   const [lakeId, setLakeId] = useState<string | null>(null);
   const [isResolvingLakeId, setIsResolvingLakeId] = useState(false);
+  const [draftPage, setDraftPage] = useState(0);
+  const DRAFT_PAGE_SIZE = 10;
+  const [isSubmittingDraft, setIsSubmittingDraft] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<
+    "idle" | "processing" | "awaitingDecision" | "accepted" | "rejected"
+  >("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [pendingSubmitMarkers, setPendingSubmitMarkers] = useState<Marker[] | null>(null);
+
+  const allMarkers = React.useMemo(
+    () => [...submittedMarkers, ...draftMarkers],
+    [submittedMarkers, draftMarkers]
+  );
+  // Markers that are actually rendered on the map.
+  // While a submission is "processing", hide the draft markers from the map
+  // but keep them in the UI so the user can still see/edit them after the
+  // accept/reject step.
+  const mapMarkers = React.useMemo(
+    () => (isSubmittingDraft ? submittedMarkers : allMarkers),
+    [isSubmittingDraft, submittedMarkers, allMarkers]
+  );
 
   const submittedIdSet = React.useMemo(() => new Set(submittedMarkers.map((m) => m.id)), [submittedMarkers]);
 
@@ -378,7 +412,7 @@ export function MyMap({
 
   const markersGeoJSON = React.useMemo((): GeoJSON.FeatureCollection<GeoJSON.Point> => ({
     type: "FeatureCollection",
-    features: allMarkers.map((marker) => ({
+    features: mapMarkers.map((marker) => ({
       type: "Feature" as const,
       geometry: {
         type: "Point" as const,
@@ -400,7 +434,7 @@ export function MyMap({
         timestamp: marker.timestamp.toISOString(),
       },
     })),
-  }), [allMarkers, submittedMarkers]);
+  }), [mapMarkers, submittedMarkers]);
 
   const handleSetLakeId = useCallback(async () => {
     if (waterType !== "lake") return;
@@ -653,6 +687,7 @@ const turb = parseFloat(turbidity);
       setAod("");
     }
     setSelectedAdditionalParams(additionalParams);
+    setDraftPage(0);
   };
 
   const handleCancelEdit = () => {
@@ -669,6 +704,7 @@ const turb = parseFloat(turbidity);
     setSelectedAdditionalParams([]);
     setLakeId(null);
     setSelectedClusterPoint(null);
+    setDraftPage(0);
   };
 
   const toggleAdditionalParam = (paramKey: AdditionalParamKey) => {
@@ -1184,7 +1220,7 @@ const turb = parseFloat(turbidity);
             </div>
 
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1">
+              <Button type="submit" className="flex-1" disabled={isSubmittingDraft}>
                 {editingMarkerId ? "Update Marker" : "Add Marker"}
               </Button>
               {editingMarkerId && (
@@ -1199,15 +1235,29 @@ const turb = parseFloat(turbidity);
                 type="button"
                 variant="default"
                 className="w-full"
+                disabled={isSubmittingDraft || draftMarkers.length === 0}
                 onClick={() => {
-                  onSubmitDraftMarkers();
-                  // Ensure draft list is cleared immediately in this view as well.
-                  onDraftMarkersChange([]);
-                  // After submit, clear draft state for next entries
-                  resetDraftFormState();
+                  if (draftMarkers.length === 0 || isSubmittingDraft) return;
+                  // Snapshot current drafts for processing, then clear them from map/UI.
+                  const snapshot = draftMarkers.map((m) => ({ ...m }));
+                  setPendingSubmitMarkers(snapshot);
+                  setSubmitError(null);
+                  setIsSubmittingDraft(true);
+                  setSubmitStatus("processing");
+                  onProcessingChange?.(true);
+                  setTimeout(() => {
+                    // After processing, ask user to accept or reject.
+                    setSubmitStatus("awaitingDecision");
+                  }, 800);
                 }}
               >
-                Submit ({draftMarkers.length})
+                {isSubmittingDraft
+                  ? submitStatus === "processing"
+                    ? "Processing…"
+                    : submitStatus === "awaitingDecision"
+                      ? "Awaiting decision…"
+                      : "Submit"
+                  : `Submit (${draftMarkers.length})`}
               </Button>
             )}
           </form>
@@ -1235,7 +1285,12 @@ const turb = parseFloat(turbidity);
                 </span>
               </p>
               <div className="space-y-2 max-h-60 overflow-y-auto">
-                {draftMarkers.map((marker) => (
+                {draftMarkers
+                  .slice(
+                    draftPage * DRAFT_PAGE_SIZE,
+                    draftPage * DRAFT_PAGE_SIZE + DRAFT_PAGE_SIZE
+                  )
+                  .map((marker) => (
                   <div
                     key={marker.id}
                     role="button"
@@ -1295,6 +1350,95 @@ const turb = parseFloat(turbidity);
                   </div>
                 ))}
               </div>
+              {draftMarkers.length > DRAFT_PAGE_SIZE && (
+                <div className="flex items-center justify-between mt-3 text-[11px] text-muted-foreground">
+                  <button
+                    type="button"
+                    disabled={draftPage === 0}
+                    onClick={() => setDraftPage((p) => Math.max(0, p - 1))}
+                    className="px-2 py-1 rounded border border-border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
+                  >
+                    Prev
+                  </button>
+                  <span>
+                    Page {draftPage + 1} of{" "}
+                    {Math.ceil(draftMarkers.length / DRAFT_PAGE_SIZE)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={(draftPage + 1) * DRAFT_PAGE_SIZE >= draftMarkers.length}
+                    onClick={() =>
+                      setDraftPage((p) =>
+                        (p + 1) * DRAFT_PAGE_SIZE >= draftMarkers.length ? p : p + 1
+                      )
+                    }
+                    className="px-2 py-1 rounded border border-border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+
+              {/* Submission status & confirmation UI */}
+              {submitError && (
+                <p className="mt-2 text-xs text-destructive">{submitError}</p>
+              )}
+              {submitStatus === "awaitingDecision" && (
+                <div className="mt-3 p-2 border border-border rounded bg-muted/60 space-y-2 text-xs">
+                  <p className="font-medium text-foreground">
+                    Processing complete. Apply these points?
+                  </p>
+                  <p className="text-muted-foreground">
+                    This simulates backend validation. Accept to save and show the points in
+                    history and profile, or reject to discard processing (drafts stay as-is).
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        if (!pendingSubmitMarkers) return;
+                        // Accept: commit processed markers to submitted + sessions via parent.
+                        onSubmitDraftMarkers(pendingSubmitMarkers);
+                        setPendingSubmitMarkers(null);
+                        resetDraftFormState();
+                        onDraftMarkersChange([]);
+                        setSubmitStatus("accepted");
+                        setIsSubmittingDraft(false);
+                        setDraftPage(0);
+                        onProcessingChange?.(false);
+                      }}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        // Reject: record a rejected session for profile only, but
+                        // do not touch submitted markers on the map.
+                        if (pendingSubmitMarkers && onRejectDraftSession) {
+                          onRejectDraftSession(pendingSubmitMarkers);
+                        }
+                        setPendingSubmitMarkers(null);
+                        // Keep draft markers and form as-is so the user can modify and resubmit.
+                        setSubmitStatus("rejected");
+                        setIsSubmittingDraft(false);
+                        setDraftPage(0);
+                        onProcessingChange?.(false);
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {submitStatus === "accepted" && !isSubmittingDraft && (
+                <p className="mt-2 text-xs text-emerald-500">
+                  Submission processed and saved.
+                </p>
+              )}
             </div>
           )}
         </CardContent>
