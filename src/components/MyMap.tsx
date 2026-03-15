@@ -1416,13 +1416,14 @@ const turb = parseFloat(turbidity);
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        // Reject: record a rejected session for profile only, but
-                        // do not touch submitted markers on the map.
+                        // Reject: record a rejected session in profile only (no map/history update).
+                        // Clear draft markers and form so points disappear from map, like Accept.
                         if (pendingSubmitMarkers && onRejectDraftSession) {
                           onRejectDraftSession(pendingSubmitMarkers);
                         }
                         setPendingSubmitMarkers(null);
-                        // Keep draft markers and form as-is so the user can modify and resubmit.
+                        onDraftMarkersChange([]);
+                        resetDraftFormState();
                         setSubmitStatus("rejected");
                         setIsSubmittingDraft(false);
                         setDraftPage(0);
