@@ -118,10 +118,17 @@ const WATER_TYPE_TILE_CONFIG: Record<
 
 function WaterTypeLayer({ waterType }: { waterType: WaterType }) {
   const { map, isLoaded } = useMap();
-  const layerConfig = WATER_TYPE_TILE_CONFIG[waterType];
 
   useEffect(() => {
     if (!map || !isLoaded) return;
+
+    // NOTE:
+    // We intentionally look up the config *inside* the effect and
+    // only depend on `waterType` (not the config object itself).
+    // This prevents the layers from being torn down and re-added on
+    // every React state change in the parent component, which caused
+    // the visible "blinking" of tiles.
+    const layerConfig = WATER_TYPE_TILE_CONFIG[waterType];
 
     // Remove existing layers
     if (map.getLayer(layerConfig.outlineLayerId)) {
@@ -197,7 +204,7 @@ function WaterTypeLayer({ waterType }: { waterType: WaterType }) {
       if (map.getSource(layerConfig.sourceId))
         map.removeSource(layerConfig.sourceId);
     };
-  }, [map, isLoaded, layerConfig]);
+  }, [map, isLoaded, waterType]);
 
   return null;
 }
@@ -695,6 +702,61 @@ const turb = parseFloat(turbidity);
     []
   );
 
+  // Memoize map style so MapLibre style is not reset on every React render.
+  const mapStyles = React.useMemo(
+    () => ({
+      light: {
+        version: 8 as const,
+        sources: {
+          "esri-satellite": {
+            type: "raster" as const,
+            tiles: [
+              "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+            attribution: "Tiles © Esri",
+          },
+          "esri-labels": {
+            type: "raster" as const,
+            tiles: [
+              "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+          },
+        },
+        layers: [
+          { id: "esri-satellite-layer", type: "raster" as const, source: "esri-satellite" },
+          { id: "esri-labels-layer", type: "raster" as const, source: "esri-labels" },
+        ],
+      },
+      dark: {
+        version: 8 as const,
+        sources: {
+          "esri-satellite": {
+            type: "raster" as const,
+            tiles: [
+              "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+            attribution: "Tiles © Esri",
+          },
+          "esri-labels": {
+            type: "raster" as const,
+            tiles: [
+              "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+          },
+        },
+        layers: [
+          { id: "esri-satellite-layer", type: "raster" as const, source: "esri-satellite" },
+          { id: "esri-labels-layer", type: "raster" as const, source: "esri-labels" },
+        ],
+      },
+    }),
+    []
+  );
+
   // For now, history is the marker's current data as a single "recent" entry. Replace with backend fetch later.
   const pointHistoryEntries = markerHistoryPanelMarker
     ? [
@@ -717,48 +779,7 @@ const turb = parseFloat(turbidity);
   ref={mapRef}
   center={[77.2090, 28.6139]}
   zoom={5}
- styles={{
-  light: {
-    version: 8,
-    sources: {
-      "esri-satellite": {
-        type: "raster",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-        tileSize: 256,
-        attribution: "Tiles © Esri",
-      },
-      "esri-labels": {
-        type: "raster",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
-        tileSize: 256,
-      },
-    },
-    layers: [
-      { id: "esri-satellite-layer", type: "raster", source: "esri-satellite" },
-      { id: "esri-labels-layer", type: "raster", source: "esri-labels" },  // roads, cities, borders on top
-    ],
-  },
-  dark: {
-    version: 8,
-    sources: {
-      "esri-satellite": {
-        type: "raster",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-        tileSize: 256,
-        attribution: "Tiles © Esri",
-      },
-      "esri-labels": {
-        type: "raster",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
-        tileSize: 256,
-      },
-    },
-    layers: [
-      { id: "esri-satellite-layer", type: "raster", source: "esri-satellite" },
-      { id: "esri-labels-layer", type: "raster", source: "esri-labels" },
-    ],
-  },
-}}
+ styles={mapStyles}
 >
           <MapControls showLocate={true} />
           <MapClickHandler onMapClick={handleMapClick} />
