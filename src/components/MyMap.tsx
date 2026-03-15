@@ -1238,15 +1238,17 @@ const turb = parseFloat(turbidity);
                 disabled={isSubmittingDraft || draftMarkers.length === 0}
                 onClick={() => {
                   if (draftMarkers.length === 0 || isSubmittingDraft) return;
-                  // Snapshot current drafts for processing, then clear them from map/UI.
+                  // Snapshot for accept/reject, then clear drafts and form so points leave map during processing.
                   const snapshot = draftMarkers.map((m) => ({ ...m }));
                   setPendingSubmitMarkers(snapshot);
+                  onDraftMarkersChange([]);
+                  resetDraftFormState();
+                  setDraftPage(0);
                   setSubmitError(null);
                   setIsSubmittingDraft(true);
                   setSubmitStatus("processing");
                   onProcessingChange?.(true);
                   setTimeout(() => {
-                    // After processing, ask user to accept or reject.
                     setSubmitStatus("awaitingDecision");
                   }, 800);
                 }}
@@ -1276,14 +1278,19 @@ const turb = parseFloat(turbidity);
             </div>
           </div>
 
-          {draftMarkers.length > 0 && (
+          {((draftMarkers.length > 0) || (isSubmittingDraft && pendingSubmitMarkers && pendingSubmitMarkers.length > 0)) && (
             <div className="mt-4 pt-4 border-t">
               <p className="text-sm font-medium mb-2">
-                Draft markers ({draftMarkers.length}){waterType && ` — ${WATER_TYPE_LABELS[waterType]}`}
+                {isSubmittingDraft && pendingSubmitMarkers
+                  ? `Submitting (${pendingSubmitMarkers.length})…`
+                  : `Draft markers (${draftMarkers.length})`}
+                {waterType && ` — ${WATER_TYPE_LABELS[waterType]}`}
                 <span className="ml-2 text-xs text-muted-foreground">
                   Submitted in history: {submittedMarkers.length}
                 </span>
               </p>
+              {draftMarkers.length > 0 && (
+              <>
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {draftMarkers
                   .slice(
@@ -1378,8 +1385,13 @@ const turb = parseFloat(turbidity);
                   </button>
                 </div>
               )}
+              </>
+              )}
 
               {/* Submission status & confirmation UI */}
+              {submitStatus === "processing" && (
+                <p className="mt-2 text-sm text-muted-foreground">Processing…</p>
+              )}
               {submitError && (
                 <p className="mt-2 text-xs text-destructive">{submitError}</p>
               )}
@@ -1389,8 +1401,8 @@ const turb = parseFloat(turbidity);
                     Processing complete. Apply these points?
                   </p>
                   <p className="text-muted-foreground">
-                    This simulates backend validation. Accept to save and show the points in
-                    history and profile, or reject to discard processing (drafts stay as-is).
+                    Accept to save these points to the map and history, or reject to record a
+                    rejected session in your profile (points are not saved; you can retry from profile).
                   </p>
                   <div className="flex gap-2">
                     <Button
