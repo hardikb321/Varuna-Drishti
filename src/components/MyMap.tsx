@@ -14,6 +14,7 @@ import { ChevronDown, X, History, BarChart2 } from "lucide-react";
 import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
 import { validateAndSnapLake } from "@/lib/validateAndSnapLake";
+import { PointChartsPanel } from "@/components/PointChartsPanel";
 
 export type MarkerColor = "red" | "blue" | "yellow" | "green";
 
@@ -322,6 +323,7 @@ export function MyMap({
   const [markerHistoryPanelMarker, setMarkerHistoryPanelMarker] = useState<Marker | null>(null);
   const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
   const [pointHistoryPanelTab, setPointHistoryPanelTab] = useState<"history" | "charts">("history");
+  const [chartYear, setChartYear] = useState<number | null>(null);
   const [samplePointIds, setSamplePointIds] = useState<Set<string>>(new Set());
   const [lakeId, setLakeId] = useState<string | null>(null);
   const [isResolvingLakeId, setIsResolvingLakeId] = useState(false);
@@ -363,6 +365,8 @@ export function MyMap({
     if (markerHistoryPanelMarker) {
       setHistoryPanelVisible(false);
       setPointHistoryPanelTab("history");
+      const y = new Date(markerHistoryPanelMarker.timestamp).getFullYear();
+      setChartYear(y);
       const t = requestAnimationFrame(() => {
         requestAnimationFrame(() => setHistoryPanelVisible(true));
       });
@@ -842,6 +846,13 @@ const turb = parseFloat(turbidity);
         },
       ]
     : [];
+
+  const availableYears = React.useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = currentYear; y >= currentYear - 20; y--) years.push(y);
+    return years;
+  }, []);
 
   return (
     <div className="flex gap-4 w-full relative">
@@ -1603,11 +1614,11 @@ const turb = parseFloat(turbidity);
                 </>
               )}
               {pointHistoryPanelTab === "charts" && (
-                <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                  <BarChart2 className="h-12 w-12 mb-4 opacity-50" />
-                  <p className="text-sm font-medium">Charts</p>
-                  <p className="text-xs mt-1">Charts for this point will be implemented here.</p>
-                </div>
+                <PointChartsPanel
+                  availableYears={availableYears}
+                  year={chartYear}
+                  onYearChange={setChartYear}
+                />
               )}
             </div>
           </aside>
