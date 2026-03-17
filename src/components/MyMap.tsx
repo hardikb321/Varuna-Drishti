@@ -15,6 +15,7 @@ import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
 import { validateAndSnapLake } from "@/lib/validateAndSnapLake";
 import { PointChartsPanel } from "@/components/PointChartsPanel";
+import { MarkerTileLayer } from "@/components/MarkerTileLayer";
 
 export type MarkerColor = "red" | "blue" | "yellow" | "green";
 
@@ -866,6 +867,11 @@ const turb = parseFloat(turbidity);
           <MapControls showLocate={true} />
           <MapClickHandler onMapClick={handleMapClick} />
           {waterType && <WaterTypeLayer key={waterType} waterType={waterType} />}
+          {waterType === "lake" && (
+            <MarkerTileLayer
+              tileUrl="https://5b6a-103-159-214-137.ngrok-free.app/api/lakes/markers/{z}/{x}/{y}.mvt"
+            />
+          )}
           {/* Submitted points only: clustered (backend data would go here). */}
           {submittedMarkers.length > 0 && (
             <MapClusterLayer
