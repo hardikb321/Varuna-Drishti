@@ -63,7 +63,7 @@ This view shows the WQI trend chart for a selected year.
 
 ![Charts View](pictures/multi-markers.jpeg)
 
-### 4. Multiple Markers on Map
+### 4. Profile View
 This view shows profile section and accepted/rejected sessions.
 
 ![Multiple Markers](pictures/profile.jpeg)
