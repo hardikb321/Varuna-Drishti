@@ -64,9 +64,9 @@ This view shows the WQI trend chart for a selected year.
 ![Charts View](pictures/multi-markers.jpeg)
 
 ### 4. Multiple Markers on Map
-This view shows many sampled points with different colors and clusters on the map.
+This view shows profile section and accepted/rejected sessions.
 
-![Multiple Markers](pictures/multi-markers.jpeg)
+![Multiple Markers](pictures/profile.jpeg)
 
 ### 5. Dashboard / Submitted vs Added Points
 This view shows the full dashboard with the map, sidebar controls, and the distinction between live added points and submitted points.
