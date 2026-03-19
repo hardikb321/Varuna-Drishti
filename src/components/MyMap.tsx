@@ -1281,7 +1281,7 @@ export function MyMap({
                 <p className="text-sm font-medium text-muted-foreground">Additional Parameters</p>
                 <div className="relative">
                   <select
-                    className="appearance-none bg-transparent border border-input rounded-md px-3 py-1.5 pr-8 text-sm cursor-pointer hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="appearance-none bg-card border border-input rounded-md px-3 py-1.5 pr-8 text-sm cursor-pointer text-foreground hover:bg-accent/40 focus:outline-none focus:ring-2 focus:ring-ring"
                     value=""
                     onChange={(e) => {
                       if (e.target.value) {

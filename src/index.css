@@ -133,4 +133,10 @@
   .maplibregl-popup-tip {
     @apply hidden!;
   }
+
+  /* Ensure dark themed selects keep consistent colors in the native dropdown. */
+  select option {
+    background-color: var(--card);
+    color: var(--card-foreground);
+  }
 }
