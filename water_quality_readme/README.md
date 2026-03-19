@@ -1,4 +1,4 @@
-# Water Quality Monitor
+# Varuna Drishti
 
 ## Project Objective
 
@@ -12,7 +12,11 @@ The platform supports:
 - A clear separation between submitted data and live/added map points
 
 Team Members:
-- Varuna Drishti Team
+- Hardik Bansal (230001031)
+- Param Saxena (230001060)
+- Keshav Singhal (230001039)
+- Thikmanik (230001077)
+- Ashrith Reddy (230001043)
 
 ---
 
