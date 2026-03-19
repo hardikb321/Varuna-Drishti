@@ -61,7 +61,7 @@ This view shows the selected point’s latest submitted record and its timestamp
 ### 3. Charts / Trend View
 This view shows the WQI trend chart for a selected year.
 
-![Charts View](pictures/point-history-chart.jpeg)
+![Charts View](pictures/multi-markers.jpeg)
 
 ### 4. Multiple Markers on Map
 This view shows many sampled points with different colors and clusters on the map.
