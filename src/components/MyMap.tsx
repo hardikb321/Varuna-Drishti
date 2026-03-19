@@ -15,7 +15,6 @@ import type { WaterType } from "@/types";
 import { WATER_TYPE_LABELS } from "@/types";
 import { validateAndSnapLake } from "@/lib/validateAndSnapLake";
 import { PointChartsPanel } from "@/components/PointChartsPanel";
-import { MarkerTileLayer } from "@/components/MarkerTileLayer";
 
 export type MarkerColor = "red" | "blue" | "yellow" | "green";
 
@@ -59,12 +58,41 @@ export interface Marker {
   lakeId?: string;
   turbidity: number;
   ph: number;
-  temperature: number;
-  bod: number;
+  temperature?: number;
+  bod?: number;
   conductivity?: number;
   aod?: number;
+  /** 22 essential parameters (user fills them in the modal). */
+  essentialParameters: Record<string, number>;
   timestamp: Date;
 }
+
+type EssentialParamKey = string;
+
+const ESSENTIAL_PARAMETERS: { key: EssentialParamKey; label: string; unit?: string }[] = [
+  { key: "arsenic_as_mg_l", label: "Arsenic (As)", unit: "[mg/L]" },
+  { key: "cadmium_cd_mg_l", label: "Cadmium (Cd)", unit: "[mg/L]" },
+  { key: "calcium_ca_mg_l", label: "Calcium (Ca)", unit: "[mg/L]" },
+  { key: "chloride_cl_mg_l", label: "Chloride (Cl)", unit: "[mg/L]" },
+  { key: "chlorine_cl2_mg_l", label: "Chlorine (Cl2)", unit: "[mg/L]" },
+  { key: "dissolved_oxygen_do_mg_l", label: "Dissolved Oxygen (DO)", unit: "[mg/L]" },
+  { key: "fecal_coliform_mpn_100ml", label: "Fecal Coliform", unit: "[MPN/100mL]" },
+  { key: "fluoride_f_mg_l", label: "Fluoride (F)", unit: "[mg/L]" },
+  { key: "iron_fe_mg_l", label: "Iron (Fe)", unit: "[mg/L]" },
+  { key: "lead_pb_mg_l", label: "Lead (Pb)", unit: "[mg/L]" },
+  { key: "magnesium_mg_l_1", label: "Magnesium (Mg)", unit: "[mg/L]" },
+  { key: "magnesium_mg_l_2", label: "Magnesium (Mg)", unit: "[mg/L]" },
+  { key: "manganese_mn_mg_l", label: "Manganese (Mn)", unit: "[mg/L]" },
+  { key: "nickel_ni_mg_l", label: "Nickel (Ni)", unit: "[mg/L]" },
+  { key: "nitrate_no3_nitrogen_mg_l", label: "Nitrate (NO3) Nitrogen", unit: "[mg/L]" },
+  { key: "ph", label: "pH", unit: "" },
+  { key: "total_alkalinity_as_caco3_mg_l", label: "Total Alkalinity as CaCO3", unit: "[mg/L]" },
+  { key: "total_coliforms_mpn_100ml", label: "Total Coliforms", unit: "[MPN/100mL]" },
+  { key: "tds_mg_l", label: "Total Dissolved Solids (TDS)", unit: "[mg/L]" },
+  { key: "total_hardness_as_caco3_mg_l", label: "Total Hardness as CaCO3", unit: "[mg/L]" },
+  { key: "turbidity_ntu", label: "Turbidity (NTU)", unit: "[NTU]" },
+  { key: "zinc_zn_mg_l", label: "Zinc (Zn)", unit: "[mg/L]" },
+];
 
 export interface Session {
   id: string;
@@ -77,6 +105,8 @@ export interface Session {
 const ADDITIONAL_PARAMETERS = [
   { key: "conductivity", label: "Conductivity (μS/cm)", placeholder: "e.g., 500" },
   { key: "aod", label: "AOD", placeholder: "e.g., 0.5" },
+  { key: "temperature", label: "Temperature (°C)", placeholder: "e.g., 25.5" },
+  { key: "bod", label: "BOD (mg/L)", placeholder: "e.g., 3.0" },
 ] as const;
 
 type AdditionalParamKey = typeof ADDITIONAL_PARAMETERS[number]["key"];
@@ -232,17 +262,34 @@ function generateSampleMarkers(count: number, centerLng: number, centerLat: numb
     const lng = centerLng + randomInRange(-spreadLng, spreadLng);
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
     const lakeId = SAMPLE_LAKE_IDS[i % SAMPLE_LAKE_IDS.length];
+
+    // Generate full set of 22 essential parameters for UI testing.
+    const essentialParameters: Record<string, number> = {};
+    ESSENTIAL_PARAMETERS.forEach((p) => {
+      if (p.key === "turbidity_ntu") return void (essentialParameters[p.key] = randomInRange(1, 50));
+      if (p.key === "ph") return void (essentialParameters[p.key] = randomInRange(6, 8.5));
+      if (p.key === "dissolved_oxygen_do_mg_l") return void (essentialParameters[p.key] = randomInRange(0.5, 12));
+      if (p.key === "fecal_coliform_mpn_100ml") return void (essentialParameters[p.key] = randomInRange(10, 1000));
+      if (p.key === "total_coliforms_mpn_100ml") return void (essentialParameters[p.key] = randomInRange(10, 2000));
+      if (p.key === "nitrate_no3_nitrogen_mg_l") return void (essentialParameters[p.key] = randomInRange(0.1, 20));
+      // Default range for the rest (placeholder until backend fetch wiring).
+      essentialParameters[p.key] = randomInRange(0.05, 100);
+    });
+
+    const turbidityVal = essentialParameters["turbidity_ntu"] ?? randomInRange(1, 50);
+    const phVal = essentialParameters["ph"] ?? randomInRange(6, 8.5);
     markers.push({
       id: `sample-${Date.now()}-${i}`,
       latitude: lat,
       longitude: lng,
       color,
       lakeId,
-      turbidity: randomInRange(1, 25),
-      ph: randomInRange(6, 8.5),
+      turbidity: turbidityVal,
+      ph: phVal,
       temperature: randomInRange(15, 32),
       bod: randomInRange(1, 12),
       timestamp: new Date(),
+      essentialParameters,
     });
   }
   return markers;
@@ -312,6 +359,10 @@ export function MyMap({
   const [ph, setPh] = useState<string>("");
   const [temperature, setTemperature] = useState<string>("");
   const [bod, setBod] = useState<string>("");
+  const [isEssentialModalOpen, setIsEssentialModalOpen] = useState(false);
+  const [essentialDraft, setEssentialDraft] = useState<Record<string, string>>({});
+  const [essentialError, setEssentialError] = useState<string | null>(null);
+  const [essentialParameters, setEssentialParameters] = useState<Record<string, number>>({});
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [markerColor, setMarkerColor] = useState<MarkerColor>("red");
   const [selectedAdditionalParams, setSelectedAdditionalParams] = useState<AdditionalParamKey[]>([]);
@@ -357,6 +408,10 @@ export function MyMap({
     setConductivity("");
     setAod("");
     setSelectedAdditionalParams([]);
+    setEssentialDraft({});
+    setEssentialError(null);
+    setIsEssentialModalOpen(false);
+    setEssentialParameters({});
     setLakeId(null);
     setSelectedClusterPoint(null);
     setMarkerHistoryPanelMarker(null);
@@ -597,17 +652,36 @@ export function MyMap({
       return;
     }
 
-const turb = parseFloat(turbidity);
-    const phVal = parseFloat(ph);
-    const temp = parseFloat(temperature);
-    const bodVal = parseFloat(bod);
-
-    if (isNaN(turb) || isNaN(phVal) || isNaN(temp) || isNaN(bodVal)) {
-      alert("Please enter valid values for all water quality parameters");
+    const missingEssential = ESSENTIAL_PARAMETERS.find(
+      (p) => !essentialParameters || essentialParameters[p.key] == null || !Number.isFinite(essentialParameters[p.key])
+    );
+    if (missingEssential) {
+      setIsEssentialModalOpen(true);
+      setEssentialError("Please fill all essential parameters before saving.");
       return;
     }
 
-    // Parse optional parameters
+    const turb = essentialParameters["turbidity_ntu"];
+    const phVal = essentialParameters["ph"];
+
+    // Optional additional parameters
+    let tempVal: number | undefined = undefined;
+    let bodVal: number | undefined = undefined;
+    if (selectedAdditionalParams.includes("temperature")) {
+      tempVal = parseFloat(temperature);
+      if (isNaN(tempVal)) {
+        alert("Please enter a valid value for Temperature");
+        return;
+      }
+    }
+    if (selectedAdditionalParams.includes("bod")) {
+      bodVal = parseFloat(bod);
+      if (isNaN(bodVal as number)) {
+        alert("Please enter a valid value for BOD");
+        return;
+      }
+    }
+
     const condVal = conductivity ? parseFloat(conductivity) : undefined;
     const aodVal = aod ? parseFloat(aod) : undefined;
 
@@ -632,10 +706,11 @@ const turb = parseFloat(turbidity);
               lakeId: resolvedLakeId ?? marker.lakeId,
               turbidity: turb,
               ph: phVal,
-              temperature: temp,
+              temperature: tempVal,
               bod: bodVal,
               conductivity: condVal,
               aod: aodVal,
+              essentialParameters: { ...essentialParameters },
             }
           : marker
       );
@@ -651,11 +726,12 @@ const turb = parseFloat(turbidity);
          lakeId: resolvedLakeId ?? undefined,
          turbidity: turb,
          ph: phVal,
-         temperature: temp,
-         bod: bodVal,
+        temperature: tempVal,
+        bod: bodVal,
          conductivity: condVal,
          aod: aodVal,
          timestamp: new Date(),
+        essentialParameters: { ...essentialParameters },
        };
       const updatedMarkers = [...draftMarkers, newMarker];
       onDraftMarkersChange(updatedMarkers);
@@ -670,6 +746,10 @@ const turb = parseFloat(turbidity);
     setConductivity("");
     setAod("");
     setSelectedAdditionalParams([]);
+    setEssentialDraft({});
+    setEssentialParameters({});
+    setEssentialError(null);
+    setIsEssentialModalOpen(false);
     setTempPin(null);
     setLakeId(null);
   };
@@ -696,6 +776,10 @@ const turb = parseFloat(turbidity);
       setConductivity("");
       setAod("");
       setSelectedAdditionalParams([]);
+      setEssentialDraft({});
+      setEssentialParameters({});
+      setEssentialError(null);
+      setIsEssentialModalOpen(false);
       setLakeId(null);
     }
     setSelectedClusterPoint(null);
@@ -708,9 +792,22 @@ const turb = parseFloat(turbidity);
     setMarkerColor(marker.color ?? "red");
     setTurbidity(marker.turbidity.toString());
     setPh(marker.ph.toString());
-    setTemperature(marker.temperature.toString());
-    setBod(marker.bod.toString());
+    setTemperature(marker.temperature != null ? marker.temperature.toString() : "");
+    setBod(marker.bod != null ? marker.bod.toString() : "");
     setLakeId(marker.lakeId ?? null);
+
+    // Populate essential params draft for the modal.
+    const nextEssentialDraft: Record<string, string> = {};
+    ESSENTIAL_PARAMETERS.forEach((p) => {
+      const v = marker.essentialParameters?.[p.key];
+      nextEssentialDraft[p.key] = v != null ? String(v) : "";
+    });
+    // Keep turbidity/ph in sync if they are stored separately.
+    nextEssentialDraft["turbidity_ntu"] = nextEssentialDraft["turbidity_ntu"] ?? marker.turbidity.toString();
+    nextEssentialDraft["ph"] = nextEssentialDraft["ph"] ?? marker.ph.toString();
+    setEssentialDraft(nextEssentialDraft);
+    setEssentialParameters(marker.essentialParameters ?? {});
+    setEssentialError(null);
     
     // Set additional params if they exist
     const additionalParams: AdditionalParamKey[] = [];
@@ -725,6 +822,16 @@ const turb = parseFloat(turbidity);
       setAod(marker.aod.toString());
     } else {
       setAod("");
+    }
+    if (marker.temperature !== undefined) {
+      additionalParams.push("temperature");
+    } else {
+      // no-op
+    }
+    if (marker.bod !== undefined) {
+      additionalParams.push("bod");
+    } else {
+      // no-op
     }
     setSelectedAdditionalParams(additionalParams);
     setDraftPage(0);
@@ -744,6 +851,10 @@ const turb = parseFloat(turbidity);
     setSelectedAdditionalParams([]);
     setLakeId(null);
     setSelectedClusterPoint(null);
+    setEssentialDraft({});
+    setEssentialError(null);
+    setEssentialParameters({});
+    setIsEssentialModalOpen(false);
     setDraftPage(0);
   };
 
@@ -867,11 +978,6 @@ const turb = parseFloat(turbidity);
           <MapControls showLocate={true} />
           <MapClickHandler onMapClick={handleMapClick} />
           {waterType && <WaterTypeLayer key={waterType} waterType={waterType} />}
-          {waterType === "lake" && (
-            <MarkerTileLayer
-              tileUrl="https://5b6a-103-159-214-137.ngrok-free.app/api/lakes/markers/{z}/{x}/{y}.mvt"
-            />
-          )}
           {/* Submitted points only: clustered (backend data would go here). */}
           {submittedMarkers.length > 0 && (
             <MapClusterLayer
@@ -1121,67 +1227,42 @@ const turb = parseFloat(turbidity);
             </div>
             
             <div className="pt-2 border-t">
-              <p className="text-sm font-medium mb-3 text-muted-foreground">Water Quality Parameters</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="turbidity" className="text-sm font-medium">
-                    Turbidity (NTU)
-                  </label>
-                  <Input
-                    id="turbidity"
-                    type="number"
-                    step="any"
-                    placeholder="e.g., 5.2"
-                    value={turbidity}
-                    onChange={(e) => setTurbidity(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="ph" className="text-sm font-medium">
-                    pH Level
-                  </label>
-                  <Input
-                    id="ph"
-                    type="number"
-                    step="any"
-                    min="0"
-                    max="14"
-                    placeholder="e.g., 7.0"
-                    value={ph}
-                    onChange={(e) => setPh(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="temperature" className="text-sm font-medium">
-                    Temperature (°C)
-                  </label>
-                  <Input
-                    id="temperature"
-                    type="number"
-                    step="any"
-                    placeholder="e.g., 25.5"
-                    value={temperature}
-                    onChange={(e) => setTemperature(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="bod" className="text-sm font-medium">
-                    BOD (mg/L)
-                  </label>
-                  <Input
-                    id="bod"
-                    type="number"
-                    step="any"
-                    placeholder="e.g., 3.0"
-                    value={bod}
-                    onChange={(e) => setBod(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
+              <p className="text-sm font-medium mb-3 text-muted-foreground">Essential Parameters</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  // If user already filled essentialParameters, sync draft strings from it.
+                  const nextDraft: Record<string, string> = { ...essentialDraft };
+                  if (Object.keys(nextDraft).length === 0 || Object.values(nextDraft).every((v) => v === "")) {
+                    ESSENTIAL_PARAMETERS.forEach((p) => {
+                      const v = essentialParameters?.[p.key];
+                      nextDraft[p.key] = v != null ? String(v) : "";
+                    });
+                    setEssentialDraft(nextDraft);
+                  }
+                  setEssentialError(null);
+                  setIsEssentialModalOpen(true);
+                }}
+              >
+                {ESSENTIAL_PARAMETERS.every((p) => essentialParameters?.[p.key] != null)
+                  ? "Edit essential parameters"
+                  : "Fill essential parameters"}
+              </Button>
+              <p className="text-xs text-muted-foreground mt-2">
+                All 22 essential parameters are mandatory (decimals allowed).
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Essential filled:{" "}
+                {
+                  ESSENTIAL_PARAMETERS.reduce(
+                    (acc, p) => acc + (essentialDraft[p.key] ? 1 : 0),
+                    0
+                  )
+                }
+                /{ESSENTIAL_PARAMETERS.length}
+              </p>
+              {essentialError && <p className="text-xs text-destructive mt-2">{essentialError}</p>}
             </div>
 
             {waterType === "lake" && (
@@ -1247,6 +1328,36 @@ const turb = parseFloat(turbidity);
               
               {selectedAdditionalParams.length > 0 && (
                 <div className="grid grid-cols-2 gap-4">
+                  {selectedAdditionalParams.includes("temperature") && (
+                    <div className="space-y-2">
+                      <label htmlFor="temperature" className="text-sm font-medium">
+                        Temperature (°C)
+                      </label>
+                      <Input
+                        id="temperature"
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 25.5"
+                        value={temperature}
+                        onChange={(e) => setTemperature(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  {selectedAdditionalParams.includes("bod") && (
+                    <div className="space-y-2">
+                      <label htmlFor="bod" className="text-sm font-medium">
+                        BOD (mg/L)
+                      </label>
+                      <Input
+                        id="bod"
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 3.0"
+                        value={bod}
+                        onChange={(e) => setBod(e.target.value)}
+                      />
+                    </div>
+                  )}
                   {selectedAdditionalParams.includes("conductivity") && (
                     <div className="space-y-2">
                       <label htmlFor="conductivity" className="text-sm font-medium">
@@ -1259,7 +1370,6 @@ const turb = parseFloat(turbidity);
                         placeholder="e.g., 500"
                         value={conductivity}
                         onChange={(e) => setConductivity(e.target.value)}
-                        required
                       />
                     </div>
                   )}
@@ -1275,7 +1385,6 @@ const turb = parseFloat(turbidity);
                         placeholder="e.g., 0.5"
                         value={aod}
                         onChange={(e) => setAod(e.target.value)}
-                        required
                       />
                     </div>
                   )}
@@ -1327,6 +1436,103 @@ const turb = parseFloat(turbidity);
               </Button>
             )}
           </form>
+
+          {isEssentialModalOpen && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+              <div className="bg-card border border-border rounded-lg w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+                <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">Essential Parameters (22)</p>
+                    <p className="text-xs text-muted-foreground">Fill all values (decimals allowed), then save.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsEssentialModalOpen(false)}
+                    className="h-8 w-8 p-0"
+                    aria-label="Close essential parameters"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="p-4 overflow-y-auto flex-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    {ESSENTIAL_PARAMETERS.map((p) => {
+                      const displayLabel =
+                        p.key === "magnesium_mg_l_1"
+                          ? `${p.label} (1)`
+                          : p.key === "magnesium_mg_l_2"
+                            ? `${p.label} (2)`
+                            : p.label;
+                      return (
+                        <div key={p.key} className="space-y-1">
+                          <label className="text-xs text-muted-foreground">
+                            {displayLabel}
+                          </label>
+                          <Input
+                            type="number"
+                            step="any"
+                            value={essentialDraft[p.key] ?? ""}
+                            placeholder={p.unit ? `e.g., 1 ${p.unit}` : "e.g., 1"}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setEssentialDraft((prev) => ({
+                                ...prev,
+                                [p.key]: v,
+                              }));
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {essentialError && (
+                    <p className="text-xs text-destructive mt-3">{essentialError}</p>
+                  )}
+                </div>
+
+                <div className="p-4 border-t border-border flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => {
+                      const parsed: Record<string, number> = {};
+                      let ok = true;
+                      ESSENTIAL_PARAMETERS.forEach((p) => {
+                        const raw = essentialDraft[p.key] ?? "";
+                        const num = parseFloat(raw);
+                        if (raw === "" || Number.isNaN(num) || !Number.isFinite(num)) {
+                          ok = false;
+                        }
+                        parsed[p.key] = num;
+                      });
+                      if (!ok) {
+                        setEssentialError("Please fill all essential parameters with valid numbers.");
+                        return;
+                      }
+                      setEssentialParameters(parsed);
+                      // Keep turbidity/pH inputs in sync (they are used in existing popup/history code).
+                      setTurbidity(String(parsed["turbidity_ntu"]));
+                      setPh(String(parsed["ph"]));
+                      setEssentialError(null);
+                      setIsEssentialModalOpen(false);
+                    }}
+                    disabled={
+                      !ESSENTIAL_PARAMETERS.every((p) => {
+                        const raw = essentialDraft[p.key] ?? "";
+                        const num = parseFloat(raw);
+                        return raw !== "" && !Number.isNaN(num) && Number.isFinite(num);
+                      })
+                    }
+                  >
+                    Save & Close
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 pt-4 border-t space-y-2">
             <p className="text-sm font-medium text-muted-foreground">Test data</p>
@@ -1409,8 +1615,8 @@ const turb = parseFloat(turbidity);
                     <div className="grid grid-cols-2 gap-1 text-muted-foreground">
                       <span>Turbidity: {marker.turbidity} NTU</span>
                       <span>pH: {marker.ph}</span>
-                      <span>Temp: {marker.temperature}°C</span>
-                      <span>BOD: {marker.bod} mg/L</span>
+                      {marker.temperature != null && <span>Temp: {marker.temperature}°C</span>}
+                      {marker.bod != null && <span>BOD: {marker.bod} mg/L</span>}
                       {marker.conductivity !== undefined && (
                         <span>Cond: {marker.conductivity} μS/cm</span>
                       )}
