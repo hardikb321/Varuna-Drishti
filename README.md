@@ -138,22 +138,22 @@ Assuming you used Add 50 random points press SUBMIT(50) Button.
 
 ![Accept Interface](water_quality_readme/pictures/Accept_Reject.png)
 
-### 2. Point History Panel
+### 4. Point History Panel
 This view shows the selected point’s latest submitted record and its timestamped history.
 
 ![Point History](water_quality_readme/pictures/point-history.jpeg)
 
-### 3. Charts / Trend View
+### 5. Charts / Trend View
 This view shows the WQI trend chart for a selected year.
 
 ![Charts View](water_quality_readme/pictures/multi-markers.jpeg)
 
-### 4. Profile View
+### 6. Profile View
 This view shows profile section and accepted/rejected sessions.
 
 ![Multiple Markers](water_quality_readme/pictures/profile.jpeg)
 
-### 5. Dashboard / Submitted vs Added Points
+### 7. Dashboard / Submitted vs Added Points
 This view shows the full dashboard with the map, sidebar controls, and the distinction between live added points and submitted points.
 
 ![Dashboard](water_quality_readme/pictures/dashboard.jpeg)
