@@ -1,54 +1,117 @@
 # Varuna Drishti
-
+ 
 ## Project Objective
-
+ 
 Develop a web-based geospatial water quality monitoring platform that allows users to add sampling markers, inspect historical point data, compare submitted and added points, and analyze water quality trends across different water bodies such as lakes, rivers, and ponds.
-
+ 
 The platform supports:
 - Interactive map-based point creation and inspection
 - Water quality parameter entry such as turbidity, pH, temperature, and BOD
 - Point history and latest-state visualization
 - Charts for trend analysis
 - A clear separation between submitted data and live/added map points
-
+ 
 Team Members:
 - Hardik Bansal (230001031)
 - Param Saxena (230001060)
 - Keshav Singhal (230001039)
 - Thikmanik (230001077)
 - Ashrith Reddy (230001043)
-
+ 
 ---
-
+ 
 ## Setup Instructions
-
+ 
 ### 1. Prerequisites
 Make sure the following are installed:
-
+ 
 - Node.js (v16 or above)
 - npm
 - A modern browser such as Chrome, Edge, or Firefox
 - Clone the Repo or install as zip
-
+ 
 ### 2. Install Dependencies
-- cd to the Root Directory of the project folder
-
-```bash
+ 
+Navigate to the root directory of the project folder, then run:
+ 
+#### Windows (Command Prompt / PowerShell)
+```cmd
+cd path\to\project
 npm install
 ```
-
+ 
+#### macOS / Linux
+```bash
+cd path/to/project
+npm install
+```
+ 
 ### 3. Run the Project
+ 
+#### Windows (Command Prompt / PowerShell)
+```cmd
+npm run dev
+```
+ 
+#### macOS / Linux
 ```bash
 npm run dev
 ```
-
+ 
 ### 4. Open in Browser
 Open the local development URL shown in the terminal, usually:
-
-```bash
+ 
+```
 http://localhost:5173
 ```
-
+ 
+---
+ 
+## Platform-Specific Notes
+ 
+### Windows
+- Use **Command Prompt**, **PowerShell**, or **Windows Terminal**.
+- If `npm` is not recognized, ensure Node.js is added to your system PATH during installation (check *"Add to PATH"* in the Node.js installer).
+- To verify installation:
+  ```cmd
+  node -v
+  npm -v
+  ```
+ 
+### macOS
+- Use the built-in **Terminal** app or a third-party terminal such as iTerm2.
+- Node.js can be installed via [nodejs.org](https://nodejs.org) or using [Homebrew](https://brew.sh):
+  ```bash
+  brew install node
+  ```
+- To verify installation:
+  ```bash
+  node -v
+  npm -v
+  ```
+ 
+### Linux
+- Use your distribution's default terminal.
+- Install Node.js via your package manager. For Ubuntu/Debian:
+  ```bash
+  sudo apt update
+  sudo apt install nodejs npm
+  ```
+  For Fedora/RHEL:
+  ```bash
+  sudo dnf install nodejs npm
+  ```
+  Or use [nvm (Node Version Manager)](https://github.com/nvm-sh/nvm) for any distro:
+  ```bash
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  nvm install 18
+  ```
+- To verify installation:
+  ```bash
+  node -v
+  npm -v
+  ```
+ 
 ---
 
 ## NOTE
